@@ -1,0 +1,3 @@
+Wed Jun 11 19:36:43 2025
+WARNING: mju_openResource: unknown file 'scene.xml'
+
