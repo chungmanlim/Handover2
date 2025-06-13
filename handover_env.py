@@ -14,27 +14,36 @@ class HandoverEnv(gym.Env):
         self.gripper_actuator = self.model.actuator("gripper").id
 
 
-        self.n_action = 8  # arm(7) + gripper(1)
+        # ✅ action space를 줄임
+        self.n_action = 4  # act2, act4, act6, gripper
 
-        # actuator 실제 control range (중요)
         self.arm_ctrl_range = np.array([
-            [-6.28, 6.28],
-            [-2.09, 2.09],
-            [-6.28, 6.28],
-            [-0.19, 3.93],
-            [-6.28, 6.28],
-            [-1.69, 3.14],
-            [-6.28, 6.28],
+            [-2.09, 2.09],   # act2
+            [-0.19, 3.93],   # act4
+            [-1.69, 3.14],   # act6
+            [-6.28, 6.28]   # act7
         ])
+
         self.gripper_ctrl_range = np.array([0.0, 255.0])
 
-        # ✅ action_space를 실제 joint range로 정의
+        # action space: 4 continuous + 1 discrete
         self.action_space = gym.spaces.Box(
-            low=np.concatenate((self.arm_ctrl_range[:, 0], [self.gripper_ctrl_range[0]])).astype(np.float32),
-            high=np.concatenate((self.arm_ctrl_range[:, 1], [self.gripper_ctrl_range[1]])).astype(np.float32),
+            low=np.array([
+                self.arm_ctrl_range[0][0],  # act2
+                self.arm_ctrl_range[1][0],  # act4
+                self.arm_ctrl_range[2][0],  # act6
+                self.arm_ctrl_range[3][0],  # act7
+                0.0  # gripper (continuous 0~1로 바꿔줌)
+            ]),
+            high=np.array([
+                self.arm_ctrl_range[0][1],
+                self.arm_ctrl_range[1][1],
+                self.arm_ctrl_range[2][1],
+                self.arm_ctrl_range[3][1],
+                1.0
+            ]),
             dtype=np.float32
         )
-
 
         # observation: joint pos (7) + object pos (3)
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(13,), dtype=np.float32)
@@ -44,7 +53,7 @@ class HandoverEnv(gym.Env):
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
 
-        init_qpos = np.array([0, -0.143, 0, 0.314, 0, 0, 0])
+        init_qpos = np.array([0, 0.724, 0, 1.11, 0, 0, 0])
         self.data.qpos[:7] = init_qpos
 
         default_obj_pos = self.data.qpos[7:10].copy()
@@ -56,19 +65,26 @@ class HandoverEnv(gym.Env):
 
         mujoco.mj_forward(self.model, self.data)
 
-        print("Current qpos after reset:", self.data.qpos[:7])
         return self._get_obs(), {}
 
 
 
     def step(self, action):
-        assert len(action) == self.n_action
+        arm_action = action[:4]
+        gripper_action = action[4]
 
-        arm_action = action[:7]
-        gripper_action = action[7]
+        full_arm_action = np.array([
+            0.0,               # act1 고정
+            arm_action[0],     # act2
+            0.0,               # act3 고정
+            arm_action[1],     # act4
+            0.0,               # act5 고정
+            arm_action[2],     # act6
+            arm_action[3],     # act7
+        ])
 
-        self.data.ctrl[self.arm_actuators] = arm_action
-        self.data.ctrl[self.gripper_actuator] = gripper_action
+        self.data.ctrl[self.arm_actuators] = full_arm_action
+        self.data.ctrl[self.gripper_actuator] = gripper_action * 255.0  # 0~1 → 0~255
 
         mujoco.mj_step(self.model, self.data)
 
@@ -77,6 +93,7 @@ class HandoverEnv(gym.Env):
         truncated = False
 
         return self._get_obs(), reward, terminated, truncated, {}
+
 
     def _get_obs(self):
         arm_pos = self.data.qpos[:7]
@@ -96,23 +113,34 @@ class HandoverEnv(gym.Env):
         obj_pos = self.data.xpos[self.model.body('object').id]
 
         dist = np.linalg.norm(ee_pos - obj_pos)
-        reward = -5.0 * dist  # distance shaping은 초기에 꽤 강하게 유지
+        reward = -10.0 * dist  # 접근 유도 보상
 
+        # 1단계: 근접하면 보상
         if dist < 0.05:
-            reward += 3.0  # 접근 성공시 보상 더 강화
+            reward += 5.0
 
-        gripper_closed = self.data.qpos[7] > 100
+            # 2단계: 근접 시 그립퍼 닫기 유도 보상
+            gripper_pos = self.data.qpos[7]
+            reward += (gripper_pos / 255.0) * 5.0
 
+        gripper_closed = self.data.qpos[7] > 200  
         if dist < 0.05 and gripper_closed:
             reward += 5.0
 
+        # 3단계: 들어올리면 추가 보상
         lift_height = obj_pos[2]
         reward += 4.0 * max(lift_height - 0.05, 0)
 
-        if lift_height > 0.1:
-            reward += 10.0
+        # ✨ 수직 lifting shaping 추가
+        xy_offset = np.linalg.norm(ee_pos[:2] - obj_pos[:2])
+        reward += 5.0 * (1 - xy_offset)  # 물체 중심으로 올릴수록 보상
+
+        if lift_height > 0.1 and xy_offset < 0.02:
+            reward += 10.0  # 안정적으로 위에서 잘 들었을 때 보상 강화
 
         return reward
+
+
 
     def render(self):
         viewer = mujoco.viewer.launch_passive(self.model, self.data)

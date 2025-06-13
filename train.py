@@ -2,6 +2,7 @@ import gymnasium as gym
 import numpy as np
 import mujoco
 import time
+import torch
 
 from stable_baselines3 import PPO
 from sb3_contrib import RecurrentPPO
@@ -18,10 +19,16 @@ check_env(env)
 
 # LSTM 정책 정의
 policy_kwargs = dict(
-    net_arch=[256, 128, 64],  # v1.x에서는 dict가 아니라 list로 넣어야 함
+    net_arch=[256, 128, 64], 
     lstm_hidden_size=512,
     n_lstm_layers=1
 )
+
+# policy_kwargs = dict(
+#     net_arch=[],  # MLP 생략
+#     lstm_hidden_size=256,
+#     n_lstm_layers=3
+# )
 
 # ✅ PPO 모델 정의
 model = RecurrentPPO(

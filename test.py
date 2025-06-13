@@ -26,7 +26,7 @@ for _ in range(10000):
         obs,
         state=lstm_state,
         episode_start=episode_start,
-        deterministic=False
+        deterministic=True
     )
 
     print("Action:", action)
