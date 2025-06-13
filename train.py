@@ -45,7 +45,7 @@ model = RecurrentPPO(
 )
 
 # ✅ 학습 시작
-model.learn(total_timesteps=500_000)
+model.learn(total_timesteps=2_000_000)
 
 # ✅ 모델 저장
 model.save("ppo_handover_grasp")
