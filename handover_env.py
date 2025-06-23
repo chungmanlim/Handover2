@@ -2,6 +2,8 @@ import gymnasium as gym
 import numpy as np
 import mujoco
 import mujoco.viewer
+import matplotlib.pyplot as plt
+from stable_baselines3.common.callbacks import BaseCallback
 
 class HandoverEnv(gym.Env):
     def __init__(self, xml_path):
@@ -173,6 +175,62 @@ class HandoverEnv(gym.Env):
         while viewer.is_running():
             mujoco.mj_step(self.model, self.data)
             viewer.sync()
+
+
+class RewardPlotCallback(BaseCallback):
+    def __init__(self, verbose=0, smoothing_window=50):
+        super().__init__(verbose)
+        self.episode_rewards = []
+        self.episode_count = 0
+        self.current_rewards = 0.0
+        self.smoothing_window = smoothing_window
+
+    def _on_step(self) -> bool:
+        # 현재 reward 누적
+        reward = self.locals["rewards"][0]
+        done = self.locals["dones"][0]
+
+        self.current_rewards += reward
+
+        if done:
+            # 에피소드 끝나면 기록
+            self.episode_rewards.append(self.current_rewards)
+            self.episode_count += 1
+            self.current_rewards = 0.0
+
+            if self.verbose > 0 and self.episode_count % 10 == 0:
+                print(f"Episode {self.episode_count}: Reward = {self.episode_rewards[-1]}")
+
+        return True
+
+    def plot_rewards(self):
+        plt.figure(figsize=(12, 6))
+
+        # 원본 reward
+        plt.plot(self.episode_rewards, label="Raw Episode Reward", alpha=0.3)
+
+        # Moving average
+        if len(self.episode_rewards) >= self.smoothing_window:
+            moving_avg = np.convolve(
+                self.episode_rewards,
+                np.ones(self.smoothing_window) / self.smoothing_window,
+                mode="valid"
+            )
+            plt.plot(
+                np.arange(self.smoothing_window - 1, len(self.episode_rewards)),
+                moving_avg,
+                label=f"Moving Avg (window={self.smoothing_window})",
+                linewidth=2,
+                color="orange"
+            )
+
+        plt.xlabel("Episode")
+        plt.ylabel("Episode Reward")
+        plt.title("Training Reward per Episode")
+        plt.legend()
+        plt.grid()
+        plt.show()
+
 
 
 if __name__ == "__main__":
