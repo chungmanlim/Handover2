@@ -31,6 +31,10 @@ class HandoverEnv(gym.Env):
         # observation
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17,), dtype=np.float32)
 
+        # max_steps / current_step 추가
+        self.max_steps = 1000
+        self.current_step = 0
+
         self.reset()
 
     def reset(self, *, seed=None, options=None):
@@ -59,6 +63,9 @@ class HandoverEnv(gym.Env):
         self.data.qvel[:] = 0
         self.data.ctrl[:] = 0
 
+        # step 카운트 초기화
+        self.current_step = 0  
+
         mujoco.mj_forward(self.model, self.data)
 
         # 디버그 출력
@@ -82,9 +89,19 @@ class HandoverEnv(gym.Env):
         mujoco.mj_step(self.model, self.data)
         mujoco.mj_forward(self.model, self.data)
 
+        # step count 증가
+        self.current_step += 1
+
         reward, terminated = self._compute_reward()
         # terminated = False
-        truncated = False
+        # truncated = False
+
+        # 시간 초과 여부 체크
+        if self.current_step >= self.max_steps:
+            truncated = True
+            reward -= 5.0
+        else:
+            truncated = False
 
         return self._get_obs(), reward, terminated, truncated, {}
 
@@ -138,6 +155,9 @@ class HandoverEnv(gym.Env):
 
         if dist < 0.05:
             reward += 10
+
+        if dist < 0.01:
+            reward += 20
             terminated = True
         else:
             terminated = False

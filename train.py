@@ -17,7 +17,7 @@ env = HandoverEnv("./ufactory_xarm7/scene.xml")
 check_env(env)
 
 policy_kwargs = dict(
-    net_arch=[256, 256, 256, 256],  # 4 layers, each 256 units
+    net_arch=[256, 256],  # 2 layers, each 256 units
     log_std_init=0.0
 )
 
@@ -27,7 +27,7 @@ model = PPO(
     env,
     verbose=1,
     device="cuda",
-    learning_rate=1e-4,
+    learning_rate=1e-6,
     n_steps=4096,
     batch_size=256,
     n_epochs=20,
