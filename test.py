@@ -22,7 +22,7 @@ reward_list = []
 episode_reward = 0.0
 
 # ✅ 테스트 루프
-for step in range(10000):
+for step in range(20000):
     action, _ = model.predict(obs, deterministic=False)
     obs, reward, terminated, truncated, info = env.step(action)
 

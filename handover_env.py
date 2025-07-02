@@ -30,11 +30,11 @@ class HandoverEnv(gym.Env):
         # action_space
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(8,), dtype=np.float32)
 
-        # observation
-        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(17,), dtype=np.float32)
+        # observation = 7 + 3 + 4 + 3 + 3 + 1 = 21
+        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(21,), dtype=np.float32)
 
         # max_steps / current_step 추가
-        self.max_steps = 1000
+        self.max_steps = 2000
         self.current_step = 0
 
         self.reset()
@@ -52,7 +52,7 @@ class HandoverEnv(gym.Env):
         self.data.qpos[10] = 0.0   # right_driver_joint
 
         # Object 초기 위치 (pos = qpos[13:16])
-        object_init_pos = np.array([0.6, 0.0, 0.0])
+        object_init_pos = np.array([0.5, 0.0, 0.0])
         delta_xy = np.random.uniform(low=-0.05, high=0.05, size=2)  # 5cm noise
         delta_z = np.random.uniform(low=0.00, high=0.02, size=1)    # 살짝 위로
         delta = np.concatenate([delta_xy, delta_z])
@@ -60,6 +60,16 @@ class HandoverEnv(gym.Env):
 
         # Object orientation (quat)
         self.data.qpos[16:20] = np.array([1.0, 0.0, 0.0, 0.0])  # no rotation
+
+        # Z축 회전 랜덤 (yaw)
+        theta = np.random.uniform(low=0, high=2*np.pi)  # [0, 2pi]
+        q_z = np.array([
+            np.cos(theta/2),  # w
+            0.0,              # x
+            0.0,              # y
+            np.sin(theta/2)   # z
+        ])
+        self.data.qpos[16:20] = q_z
 
         # Velocity 초기화
         self.data.qvel[:] = 0
@@ -122,6 +132,9 @@ class HandoverEnv(gym.Env):
         # object pos
         obj_pos = self.data.xpos[self.model.body('object').id]
 
+        # object orientation (quat)
+        obj_quat = self.data.qpos[16:20]
+
         # Position of grippers
         left_tip = self.data.site_xpos[self.model.site('left_finger_tip_site').id]
         right_tip = self.data.site_xpos[self.model.site('right_finger_tip_site').id]
@@ -139,10 +152,10 @@ class HandoverEnv(gym.Env):
         gripper_pos_norm = np.clip(gripper_pos / gripper_max, 0.0, 1.0)
 
         # concat
-        obs = np.concatenate([arm_pos, obj_pos, ee_pos, rel_obj_pos, [gripper_pos_norm]])
+        obs = np.concatenate([arm_pos, obj_pos, obj_quat, ee_pos, rel_obj_pos, [gripper_pos_norm]])
         return obs.astype(np.float32)
-
-
+    
+    
     def _compute_reward(self):
         # Position of grippers
         left_tip = self.data.site_xpos[self.model.site('left_finger_tip_site').id]
@@ -150,16 +163,38 @@ class HandoverEnv(gym.Env):
         ee_pos = 0.5 * (left_tip + right_tip)
 
         obj_pos = self.data.xpos[self.model.body('object').id]
+        obj_height = obj_pos[2]  # z-axis
 
         dist = np.linalg.norm(ee_pos - obj_pos)
 
-        reward = np.exp(-dist) - 1.0
+        reward = np.exp(-10 * dist) - 1.0
 
-        if dist < 0.05:
-            reward += 10
+        # time penalty
+        reward -= 0.1 
 
-        if dist < 0.01:
-            reward += 20
+        # gripper closing 여부 (qpos 기준)
+        gripper_left_qpos = self.data.qpos[7]
+        gripper_right_qpos = self.data.qpos[10]
+        gripper_pos = 0.5 * (gripper_left_qpos + gripper_right_qpos)
+
+        # print(gripper_pos)
+        gripper_opened = gripper_pos < 0.1  # 임계값: gripper 거의 열림
+        gripper_closed = gripper_pos > 0.6  # 임계값: gripper 거의 닫힘
+
+        # 물체 접근
+        if gripper_opened and dist < 0.03 and dist > 0.01:
+            reward += 0.5
+
+        # # 손끝과 object가 매우 가까워지고, gripper가 닫힐 때
+        # if gripper_closed and dist < 0.01:
+        #     reward += 1
+
+        # grip 유지 + lifting
+        if gripper_closed and obj_height < 0.1:
+            reward += min(1000 * obj_height, 100)
+ 
+        if obj_height > 0.1:
+            reward += 1000
             terminated = True
         else:
             terminated = False
